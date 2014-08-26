@@ -54,15 +54,20 @@ lisp> (cmpp "(js-blk (js-do 1 2 3))")
   `(do (= (. *curropt* ,a) ,b)
        nil))
 
-#|(def tropts1 (ob a)
+#|(def opsfr1 (ob a)
   `(do (al "ob = $1 | a = $2 | has = $3" ,ob ',a (ohas (getopt ,ob) ',a))
        (if (ohas (getopt ,ob) ',a) (opt ,a (. (getopt ,ob) ,a)))))|#
 
-(def tropts1 (ob a)
+(def opsfr1 (ob a)
   `(if (ohas (getopt ,ob) ',a) (opt ,a (. (getopt ,ob) ,a))))
 
-(mac tropts (ob . a)
-  `(do ,@(map [tropts1 ob _] a)))
+(mac opsfr (ob . a)
+  `(do ,@(map [opsfr1 ob _] a)))
+
+(mac cpops (ops . a)
+  `(let #r (do ,@a)
+     (opsfr #r ,@ops)
+     #r))
 
 (mac prc (nm . bd)
   `(dyn *curropt* {}
@@ -87,20 +92,23 @@ lisp> (cmpp "(js-blk (js-do 1 2 3))")
 
 ;;; Places ;;;
 
+(def send (a)
+  (cmp1 a))
+
 ; *ps* = places
 (var *ps* nil)
-(over cmp (a (o p))
+#|(over cmp (a (o p))
   (if (no p) (sup a)
-      (wpla p (cmppla a))))
+      (cpla p (send a))))|#
 
-(mac wpla (p . a)
+(mac stapla (p . a)
   `(sta *ps* ,p ,@a))
 
-(def cmppla (a)
-  (place (cmp1 a) *ps*))
+(mac wpla (p a)
+  `(stapla ,p (place ,a *ps*)))
 
-(mac inpla (p a)
-  `(wpla ,p (place ,a *ps*)))
+(mac cpla (p a)
+  `(wpla ,p (send ,a)))
 
 #|
 (over cmp (a (o p))
@@ -276,7 +284,7 @@ lisp> (cmpp "(js-blk (js-do 1 2 3))")
 (def cdo1 (a)
   (if (no (cdr a))
         (let r (cmp (car a) 'dolas)
-          (tropts r ret thr brk)
+          (opsfr r ret thr brk)
           r)
       (let fst (cmp (car a) 'do)
         (if (redun? fst) (cdo1 (cdr a))
@@ -304,7 +312,7 @@ lisp> (cmpp "(js-blk (js-do 1 2 3))")
       (no (cdr a)) (cmp (car a) 'if)
       (with (ts (cmp (car a) 'bot)
              yes (cmp (cadr a) 'if))
-        (tropts yes ret thr brk)
+        (opsfr yes ret thr brk)
         (if (exi? yes)
               (lns (lin "if (" ts ")" (chkbra yes))
                    (cif1 (cddr a)))
@@ -327,9 +335,8 @@ lisp> (cmpp "(js-blk (js-do 1 2 3))")
 (defrt if blk)
 
 (defprc ret (a)
-  (let r (cmp a 'ret)
-    (tropts r ret thr brk bra)
-    r))
+  (cpops (ret thr brk bra) 
+    (cpla 'ret a)))
 
 (defpla ret blk ret)
 (defrt ret blk)
@@ -340,12 +347,63 @@ lisp> (cmpp "(js-blk (js-do 1 2 3))")
 |#
 
 (defprc nret (a)
-  (let r (cmp a 'nret)
-    (tropts r ret thr brk bra)
-    r))
+  (cpops (ret thr brk bra)
+    (cpla 'nret a)))
 
 (defpla nret blk)
 (defrt nret blk)
+
+#|
+(defprc fn (ag . bd)
+  (lns (lin "function (" (joi ag ", ") "){")
+       (wpla 'blk (call do bd))))
+
+(defprc do a
+  (if (no a) (chan nil)
+      (no (cdr a)) (chan (car a))
+      (let fst (cpla 'do (car a))
+        (if (redun? fst) (pass do (cdr a))
+            (do (opt bra t)
+                (lns fst (cdo1 @(cdr a))))))))
+
+(def cdo1 a
+  (if (no (cdr a))
+        (cpops (ret thr brk)
+          (cpla 'dolas (car a)))
+      (let fst (cpla 'do (car a))
+        (if (redun? fst) (cdo1 @(cdr a))
+            (lns fst (cdo1 @(cdr a)))))))
+
+(defprc if a
+  (if (no a) (chan nil)
+      (no (cdr a)) (chan (car a))
+      (do (opt bra t)
+          (cif1 a))))
+
+(def cif1 (a)
+  (if (no a) (cpla 'if nil)
+      (no (cdr a)) (cpla 'if (car a))
+      (with (ts (cpla 'bot (car a))
+             yes (cpla 'if (cadr a)))
+        (opsfr yes ret thr brk)
+        (if (exi? yes)
+              (lns (lin "if (" ts ")" (chkbra yes))
+                   (cif1 (cddr a)))
+            (needbra? yes)
+              (lin "if (" ts ")" (chkbra yes) " " (celif (cddr a)))
+            (lns (lin "if (" ts ")" (chkbra yes))
+                 (celif (cddr a)))))))
+
+(def celif (a)
+  (if (no a) nil
+      (no (cdr a)) (lin "else " (chkbra (cpla 'if (car a))))
+      (with (ts (cpla 'bot (car a))
+             yes (cpla 'if (cadr a)))
+        (if (needbra? yes)
+              (lin "else if (" ts ")" (chkbra yes) " " (celif (cddr a)))
+            (lns (lin "else if (" ts ")" (chkbra yes))
+                 (celif (cddr a)))))))
+|#
 
 #|(def mkdo (a p)
   (if (no a) nil
