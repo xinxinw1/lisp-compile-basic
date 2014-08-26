@@ -119,8 +119,8 @@ lisp> (cmpp "(js-blk (js-do 1 2 3))")
 (def place (a ps)
   a)
 
-(def cpa (a p)
-  (map [cmp _ p] a))
+(def cpa (p a)
+  (map [cpla p _] a))
 
 (mac defpla (a . opt)
   nil)
@@ -241,10 +241,10 @@ lisp> (cmpp "(js-blk (js-do 1 2 3))")
       (err jvar "Can't coerce a = $1 to jvar" a)))
 
 (defprc cal (nm . ag)
-  (lin (cmp nm 'refee) (mpar ag)))
+  (lin (cpla 'refee nm) (mpar ag)))
 
 (def mpar (a)
-  (lin "(" (btwa (cpa a 'inln) ", ") ")"))
+  (lin "(" (btwa (cpa 'inln a) ", ") ")"))
 
 (defprc blk a
   (opt bra t)
