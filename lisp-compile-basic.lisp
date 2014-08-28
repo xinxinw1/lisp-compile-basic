@@ -209,16 +209,6 @@ Examples:
 (xmmac dtfn a (x . args)
   `((. ,x ,@a) ,@args))
 
-(def las (a)
-  (if (no a) nil
-      (no (cdr a)) (car a)
-      (las (cdr a))))
-
-(def but (a)
-  (if (no a) nil
-      (no (cdr a)) nil
-      (cons (car a) (but (cdr a)))))
-
 ; ((combine a b c) 1 2 3)
 ; -> (a (b (c 1 2 3)))
 (xmmac combine fs args
@@ -233,15 +223,21 @@ Examples:
   `(sta *ps* ,p ,@a))
 
 (mac wpla (p a)
-  `(stapla ,p (place ,a *ps*)))
+  `(stapla ,p (place ,a)))
 
 (mac cpla (p a)
   `(wpla ,p (send ,a)))
 
+(def currpla ()
+  (car *ps*))
+
+(def getps ()
+  *ps*)
+
 ; does any operations (such as adding parens, order of operations)
-;   needed to put a into the env defined by ps;
+;   needed to put a into the env defined by *ps*;
 ;   should be overridden for the target language
-(def place (a ps)
+(def place (a)
   a)
 
 ; compile all in list a in place p
@@ -265,8 +261,9 @@ Examples:
 (var *blkpla* nil)
 (var *blkrts* nil)
 
-(def inblk? (ps)
-  (has (car ps) *blkpla*))
+(def inblk? ()
+  (or (no (currpla))
+      (has (currpla) *blkpla*)))
 
 (def blk? (a)
   (has (. a tp) *blkrts*))
@@ -279,7 +276,7 @@ Examples:
 (var *retpla* nil)
 (var *endpla* nil)
 
-(def inret? (ps)
+(def inret? ((o ps (getps)))
   (if (no ps) nil
       (has (car ps) *retpla*) t
       (has (car ps) *endpla*) (inret? (cdr ps))
@@ -319,19 +316,37 @@ Examples:
   (if (needbra? a) (mkbra a)
       a))
 
+; *reqbrac* is a list of lists
+; each list is of the form (rt pl) which specifies that
+;   when a rt obj of type rt is placed in a place pl, it requires brackets
+(var *reqbrac* nil)
+
+; ex. (defreq doln inln)
+(mac defreq (rt pl)
+  `(psh '(,rt ,pl) *reqbrac*))
+
+; ex. (reqbrac 'doln 'inln)
+(def reqbrac? (rt pl)
+  (has [iso _ (lis rt pl)] *reqbrac*))
+
 ; a should always be a rt
-(def place (a ps)
-  (if (inblk? ps)
-        (if (no (blk? a))
-              (if (no (inret? ps))
-                    (do (when (is (. a tp) 'fn)
-                          (= a (mapdat [lin "(" _ ")"] a)))
-                        (mapdat [lin _ ";"] a))
-                  (rt (. a tp) (lin "return " (. a dat) ";")
-                      (owith (. a opt) 'ret t)))
-            a)
+(def place (a)
+  ;(bugm "place" a (inblk?) (blk? a) (inret?))
+  (if (inblk?)
+        (if (blk? a) a
+            (no (inret?))
+              (do (when (is (. a tp) 'fn)
+                    (= a (mapdat [lin "(" _ ")"] a)))
+                  (mapdat [lin _ ";"] a))
+            (rt (. a tp) (lin "return " (. a dat) ";")
+                (owith (. a opt) 'ret t)))
+      (blk? a) (err place "Can't place blk $1 inside inline place $2"
+                          a (currpla))
+      (reqbrac? (. a tp) (currpla))
+        (mapdat [lin "(" _ ")"] a)
       a))
 
+; define whether your place is a blk or a ret or end
 (mac defpla (a . opt)
   `(with (#a ',a #opt '(,@opt))
      (if (has 'blk #opt) (psh #a *blkpla*))
@@ -339,6 +354,7 @@ Examples:
      (if (has 'end #opt) (psh #a *endpla*))
      nil))
 
+; define whether your rt is a blk
 (mac defrt (a . opt)
   `(with (#a ',a #opt '(,@opt))
      (if (has 'blk #opt) (psh #a *blkrts*))
@@ -401,22 +417,47 @@ Examples:
 (defprc do a
   (if (no a) (chan nil)
       (no (cdr a)) (chan (car a))
-      (let fst (cpla 'do (car a))
-        (if (redun? fst) (pass do @(cdr a))
-            (do (opt bra t)
-                (lns fst (cdo1 @(cdr a))))))))
+      (inblk?) (cdo @a)
+      (pass doln @a)))
 
-(def cdo1 a
+(def cdo a
+  (let fst (cpla 'do (car a))
+    (if (redun? fst) (pass do @(cdr a))
+        (do (opt bra t)
+            (lns fst (cdo2 @(cdr a)))))))
+
+; same as cdo but don't pass to do and process last one differently
+(def cdo2 a
   (if (no (cdr a))
         (cpops (ret thr brk)
           (cpla 'dolas (car a)))
       (let fst (cpla 'do (car a))
-        (if (redun? fst) (cdo1 @(cdr a))
-            (lns fst (cdo1 @(cdr a)))))))
+        (if (redun? fst) (cdo2 @(cdr a))
+            (lns fst (cdo2 @(cdr a)))))))
 
 (defpla do blk)
 (defpla dolas blk end)
 (defrt do blk)
+
+(defprc doln a
+  (if (no a) (chan nil)
+      (no (cdr a)) (chan (car a))
+      (cdoln @a)))
+
+(def cdoln a
+  (let fst (cpla 'doln (car a))
+    (if (redun? fst) (pass do @(cdr a))
+        (lin fst ", " (cdoln2 @(cdr a))))))
+
+; same as cdoln but don't pass to do
+(def cdoln2 a
+  (let fst (cpla 'doln (car a))
+    (if (no (cdr a)) fst
+        (redun? fst) (cdoln2 @(cdr a))
+        (lin fst ", " (cdoln2 @(cdr a))))))
+
+; putting a doln rt into an inln pla requires brackets
+(defreq doln inln)
 
 (def redun? (a)
   ;(al "a = $1" a)
@@ -445,10 +486,11 @@ Examples:
 (defprc if a
   (if (no a) (chan nil)
       (no (cdr a)) (chan (car a))
-      (do (opt bra t)
-          (cif1 a))))
+      (inblk?) (do (opt bra t)
+                   (cif1 @a))
+      (pass ifln @a)))
 
-(def cif1 (a)
+(def cif1 a
   (if (no a) (cpla 'if nil)
       (no (cdr a)) (cpla 'if (car a))
       (with (ts (cpla 'bot (car a))
@@ -456,24 +498,35 @@ Examples:
         (opsfr yes ret thr brk)
         (if (exi? yes)
               (lns (lin "if (" ts ")" (chkbra yes))
-                   (cif1 (cddr a)))
+                   (cif1 @(cddr a)))
             (needbra? yes)
-              (lin "if (" ts ")" (chkbra yes) " " (celif (cddr a)))
+              (lin "if (" ts ")" (chkbra yes) " " (celif @(cddr a)))
             (lns (lin "if (" ts ")" (chkbra yes))
-                 (celif (cddr a)))))))
+                 (celif @(cddr a)))))))
 
-(def celif (a)
+(def celif a
   (if (no a) nil
       (no (cdr a)) (lin "else " (chkbra (cpla 'if (car a))))
       (with (ts (cpla 'bot (car a))
              yes (cpla 'if (cadr a)))
         (if (needbra? yes)
-              (lin "else if (" ts ")" (chkbra yes) " " (celif (cddr a)))
+              (lin "else if (" ts ")" (chkbra yes) " " @(celif (cddr a)))
             (lns (lin "else if (" ts ")" (chkbra yes))
-                 (celif (cddr a)))))))
+                 (celif @(cddr a)))))))
 
 (defpla if blk end)
 (defrt if blk)
+
+(defprc ifln a
+  (if (no a) (chan nil)
+      (no (cdr a)) (chan (car a))
+      (cifln2 @a)))
+
+(def cifln2 (ts yes nop . rst)
+  (lvl (lin (cpla 'iflntest ts) "?"
+            (cpla 'iflnyes yes) ":"
+            (if (no rst) (cpla 'iflnno nop)))
+       (if rst (cifln2 @rst))))
 
 (defprc ret (a)
   (cpops (ret thr brk bra) 
@@ -509,6 +562,8 @@ Examples:
        "}"))
 
 (defrt def blk)
+
+
 
 ;;; Lines ;;;
 
