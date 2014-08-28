@@ -673,25 +673,28 @@ hey
 (var *indlvl* 0)
 (var *begline* t)
 (var *linepos* 0)
-(var *freshln* nil)
+(var *indented* nil)
 
-; if *freshln* is true, emit does nothing when a = ""
 ; don't send "\n" to emit
 
 (def emit (a)
   ;(al "a = $1 | *indlvl* = $2 | *begline* = $3 | *linepos* = $4" a *indlvl* *begline* *linepos*)
-  (unless (and *freshln* (is a ""))
-    (when *begline*
-      (pr (nof *indlvl* " "))
-      (+= *linepos* *indlvl*))
+  (unless *indented* (emitind))
+  (unless (is a "")
     (pr a)
     (+= *linepos* (len a))
     (= *begline* nil)))
 
+(def emitind ()
+  (pr (nof *indlvl* " "))
+  (+= *linepos* *indlvl*)
+  (= *indented* t))
+
 (def newln ()
   (pr "\n")
   (= *linepos* 0)
-  (= *begline* t))
+  (= *begline* t)
+  (= *indented* nil))
 
 (def freshln ()
   (unless *begline* (newln)))
@@ -700,6 +703,7 @@ hey
   (= *indlvl* 0)
   (= *linepos* 0)
   (= *begline* t)
+  (= *indented* nil)
   nil)
 
 ;;; Process lines ;;;
@@ -716,11 +720,9 @@ hey
         'lin (proclin a)
         'lns (proclns a)
         'flns (procflns a)
-        'lvl (dyn *indlvl* *linepos*
-               (proclns a))
+        'lvl (proclvl a)
         'ind (procind a)
-        'lvlind (dyn *indlvl* *linepos*
-                  (procind a))
+        'lvlind (proclvlind a)
         'wind (procwind a)
         'rt (proc1 (. a dat))
         (err proc1 "Unknown type a = $1" a))
@@ -735,23 +737,29 @@ hey
 
 ; process lns objects
 (def proclns (a)
-  (dyn *freshln* nil
-    (var fst t)
-    (each x (rflat (. a dat))
-      (if (no x) (cont))
-      (if fst (= fst nil)
-          (newln))
-      (proc1 x))))
+  (var fst t)
+  (each x (rflat (. a dat))
+    (if (no x) (cont))
+    (if fst (= fst nil)
+        (newln))
+    (proc1 x)))
 
 ; process flns objects
 (def procflns (a)
-  (dyn *freshln* t
-    (var fst t)
-    (each x (rflat (. a dat))
-      (if (no x) (cont))
-      (if fst (= fst nil)
-          (freshln))
-      (proc1 x))))
+  (var fst t)
+  (each x (rflat (. a dat))
+    (if (no x) (cont))
+    (if fst (= fst nil)
+        (freshln))
+    (proc1 x)))
+
+(def proclvl (a)
+  (dyn *indlvl* (if *indented* *linepos* *indlvl*)
+    (proclns a)))
+
+(def proclvlind (a)
+  (dyn *indlvl* (if *indented* *linepos* *indlvl*)
+    (procind a)))
 
 (def procind (a)
   (dyn *indlvl* (+ *indlvl* (. a n))
