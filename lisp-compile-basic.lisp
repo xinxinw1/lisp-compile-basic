@@ -12,6 +12,13 @@ Examples:
 (def cmp (a)
   (proc (cmp1 a)))
 
+; numbers are sent to the cal js procedure
+; symbols are sent to sym
+; strings are sent to str
+; nil is sent to sym as 'nil
+; the cal procedure is used for calls that aren't
+;   defined as procedures or macros
+
 (def cmp1 (a)
   (if (atm? a)
     (case a
@@ -28,7 +35,7 @@ Examples:
     (if (sym? e)
       (if (smset? e) (send (cons (xsmcal e) a))
           (mset? e) (send (xmcal e a))
-          (sset? e) (xspc e a)
+          (sset? e) (xscal e a)
           (cprc e @a))
       (call cal e @a))
     (cmp1ll (car e) (cdr e) a)))
@@ -36,13 +43,17 @@ Examples:
 (def cmp1ll (e a b)
   (if (atm? e)
     (if (sym? e)
-      (if (smset? e) (send (cons (cons (xsmcal e) a) b))
-          (mset? e) (send (cons (xmcal e a) b))
-          (sset? e) (call cal (xspc e a) @b)
-          (mmset? e) (send (xmmcal e a b))
-          (call cal (cprc e @a) @b))
-      (call cal e @a @b))
-    (call cal e @a @b)))
+      (if (mmset? e) (send (xmmcal e a b))
+          (call cal (cons e a) @b))
+      (call cal (cons e a) @b))
+    (call cal (cons e a) @b)))
+
+#|
+(send a) -> compile a
+(call p @a) -> call jsprc p with args a
+(chan a) -> cancel current compilation and (send a) instead
+(pass p @a) -> cancel current compilation and (call p @a) instead
+|#
 
 (def send (a)
   (cmp1 a))
@@ -57,6 +68,7 @@ Examples:
 
 (var *curropt* {})
 
+; set option nm to val
 (mac opt (nm val)
   `(do (= (. *curropt* ,nm) ,val)
        nil))
@@ -64,14 +76,17 @@ Examples:
 (def opsfr1 (ob a)
   `(if (ohas (. ,ob opt) ',a) (opt ,a (. ,ob opt ,a))))
 
+; use options in a from rt obj ob
 (mac opsfr (ob . a)
   `(do ,@(map [opsfr1 ob _] a)))
 
+; copy options in ops from rt obj in (do @a) and return rt obj
 (mac cpops (ops . a)
   `(let #r (do ,@a)
      (opsfr #r ,@ops)
      #r))
 
+; define procedure
 (mac defprc (nm ag . bd)
   `(= (. *prcs* ,nm)
       (fn ,ag
@@ -96,7 +111,13 @@ Examples:
 (mkoacc smacs sm)
 (mkoacc mmacs mm)
 
-(def xspc (e a)
+; mmacs can be used to optimize exprs like
+;   ((dtfn test) a x y z)
+;   to ((. a test) x y z)
+;   or ((combine f g) a b c)
+;   to (f (g a b c))
+
+(def xscal (e a)
   ((sref e) @a))
 
 (def xmcal (e a)
@@ -108,6 +129,8 @@ Examples:
 (def xmmcal (e a b)
   ((mmref e) a b))
 
+; (xmac ...) should be the same thing as running
+;   (js-mac ...) in the compiler
 (mac xmac (nm ag . bd)
   `(mput ',(app 'js- nm) (fn ,ag ,@bd)))
 
@@ -150,7 +173,8 @@ Examples:
   (mmren fr to)
   nil)
 
-
+; special procedures are not compiled again after they are run
+; this means the return value should already be compiled
 (mac xspec (nm ag . bd)
   `(sput ',(app 'js- nm) (fn ,ag ,@bd)))
 
@@ -177,6 +201,29 @@ Examples:
     (mmulay)
     r))
 
+(mac xmmac (nm ag1 ag2 . bd)
+  `(mmput ',(app 'js- nm) (fn (,ag1 ,ag2) ,@bd)))
+
+; ((dtfn a b c) x 1 2 3)
+; -> ((. x a b c) 1 2 3)
+(xmmac dtfn a (x . args)
+  `((. ,x ,@a) ,@args))
+
+(def las (a)
+  (if (no a) nil
+      (no (cdr a)) (car a)
+      (las (cdr a))))
+
+(def but (a)
+  (if (no a) nil
+      (no (cdr a)) nil
+      (cons (car a) (but (cdr a)))))
+
+; ((combine a b c) 1 2 3)
+; -> (a (b (c 1 2 3)))
+(xmmac combine fs args
+  (foldr lis `(,(las fs) ,@args) (but fs)))
+
 ;;; Places ;;;
 
 ; *ps* = places
@@ -191,19 +238,29 @@ Examples:
 (mac cpla (p a)
   `(wpla ,p (send ,a)))
 
+; does any operations (such as adding parens, order of operations)
+;   needed to put a into the env defined by ps;
+;   should be overridden for the target language
 (def place (a ps)
   a)
 
+; compile all in list a in place p
 (def cpa (p a)
   (map [cpla p _] a))
 
+; define place; should be overridden to define options that
+;   will be used by place
 (mac defpla (a . opt)
   nil)
 
+; define rt (return object)
 (mac defrt (a . opt)
   nil)
 
 ;;; JS Places ;;;
+
+; block places include the top level, inside a function, a while, an if...
+; a block rt is anything that needs to be placed inside a block
 
 (var *blkpla* nil)
 (var *blkrts* nil)
@@ -214,6 +271,11 @@ Examples:
 (def blk? (a)
   (has (. a tp) *blkrts*))
 
+; return places include the end of a function and inside
+;   a ret expression
+; an end place is a place that carries over returns, but isn't a
+;   ret place itself
+
 (var *retpla* nil)
 (var *endpla* nil)
 
@@ -222,6 +284,11 @@ Examples:
       (has (car ps) *retpla*) t
       (has (car ps) *endpla*) (inret? (cdr ps))
       nil))
+
+; the ret rt option signals whether the code inside always returns
+; the thr option signals whether the code always throws
+; the brk option signals whether the code always breaks
+; exi? says whether the code always exits, whether by ret, thr, or brk
 
 (def ret? (a)
   (. a opt ret))
@@ -235,6 +302,7 @@ Examples:
 (def exi? (a)
   (or (ret? a) (thr? a) (brk? a)))
 
+; the bra option says whether the code needs braces
 (def bra? (a)
   (. a opt bra))
 
@@ -246,6 +314,7 @@ Examples:
 (def mkbra (a)
   (lns "{" (ind 2 a) "}"))
 
+; add bracket if a needs it
 (def chkbra (a)
   (if (needbra? a) (mkbra a)
       a))
@@ -286,12 +355,24 @@ Examples:
 (defprc str (a)
   (dsp a))
 
+; is a already a js variable
 (def jvar? (a)
   (has #"^[a-zA-Z$_][a-zA-Z0-9$_]*$" a))
 
+; is a suitable for conversion?
 (def var? (a)
   (has #"^\*?[a-zA-Z$_*/+-^=!][a-zA-Z0-9$_*/+-^=!?-]*\*?$" a))
 
+; convert lisp sym to js variable
+; todo: *var* -> VAR
+; * -> mul
+; / -> div
+; + -> add
+; - -> sub
+; ^ -> pow
+; ! -> bang
+; ? -> p
+; a-test -> aTest
 (def jvar (a)
   (if (jvar? a) (str a)
       (var? a)
@@ -434,27 +515,88 @@ Examples:
 (def mklnobj (typ ob)
   (app ob {typ typ}))
 
+#| line:
+(prn (proc (lin "" "test" "" "" "test"))) ->
+testtest
+|#
+
 (def lin a
   (mklnobj 'lin {dat a}))
+
+#| lines:
+(prn (proc (lns "" "test" "" "" "test"))) ->
+
+test
+
+
+test
+|#
 
 (def lns a
   (mklnobj 'lns {dat a}))
 
+#| fresh lines:
+(prn (proc (flns "" "test" "" "" "test"))) ->
+test
+test
+|#
+
+(def flns a
+  (mklnobj 'flns {dat a}))
+
+#| level:
+(prn (proc (lin "test" (lvl "test" "" "abc")))) ->
+testtest
+    
+    abc
+|#
+
 (def lvl a
   (mklnobj 'lvl {dat a}))
+
+#| level with indent on next lines:
+(prn (proc (lin "test" (lvlind 3 "testing" "abc" "def")))) ->
+testtesting
+       abc
+       def
+
+(mac lvlind (n fst . rst)
+  `(lvl ,fst (ind ,n ,@rst)))
+|#
 
 (def lvlind (n . a)
   (mklnobj 'lvlind {dat a n n}))
 
+#| indent:
+(prn (proc (lns "test" (ind 3 "testing" (ind 2 "abc" "def")) "hey"))) ->
+test
+   testing
+     abc
+     def
+hey
+|#
+
 (def ind (n . a)
   (mklnobj 'ind {dat a n n}))
+
+#| with indent:
+(prn (proc (lns "test" (ind 3 "testing" (wind 2 "abc" "def") "what") "hey"))) ->
+test
+   testing
+  abc
+  def
+   what
+hey
+|#
 
 (def wind (n . a)
   (mklnobj 'wind {dat a n n}))
 
+; return object: proc only uses dat property
 (def rt (tp a (o opt {}))
   (mklnobj 'rt {dat a tp tp opt (app {orig a} opt)}))
 
+; applies f to dat property of a
 (def mapdat (f a)
   (mklnobj (. a typ) (app a {dat (f (. a dat))})))
 
@@ -476,15 +618,20 @@ Examples:
 (var *indlvl* 0)
 (var *begline* t)
 (var *linepos* 0)
+(var *freshln* nil)
+
+; if *freshln* is true, emit does nothing when a = ""
+; don't send "\n" to emit
 
 (def emit (a)
   ;(al "a = $1 | *indlvl* = $2 | *begline* = $3 | *linepos* = $4" a *indlvl* *begline* *linepos*)
-  (when *begline*
-    (pr (nof *indlvl* " "))
-    (+= *linepos* *indlvl*))
-  (pr a)
-  (+= *linepos* (len a))
-  (= *begline* nil))
+  (unless (and *freshln* (is a ""))
+    (when *begline*
+      (pr (nof *indlvl* " "))
+      (+= *linepos* *indlvl*))
+    (pr a)
+    (+= *linepos* (len a))
+    (= *begline* nil)))
 
 (def newln ()
   (pr "\n")
@@ -506,57 +653,50 @@ Examples:
   (resetln)
   (tostr (proclin (lin a))))
 
+; process any type
+(def proc1 (a)
+  (case a
+    obj?
+      (case (. a typ)
+        'lin (proclin a)
+        'lns (proclns a)
+        'flns (procflns a)
+        'lvl (dyn *indlvl* *linepos*
+               (proclns a))
+        'ind (procind a)
+        'lvlind (dyn *indlvl* *linepos*
+                  (procind a))
+        'wind (procwind a)
+        'rt (proc1 (. a dat))
+        (err proc1 "Unknown type a = $1" a))
+    syn? (emit (str a))
+    str? (emit a)
+    (err proc1 "Unknown type a = $1" a)))
+
+; process lin objects
 (def proclin (a)
   (each x (rflat (. a dat))
-    (unless (no x) (proclin1 x))))
+    (unless (no x) (proc1 x))))
 
-(def proclin1 (a)
-  (case a
-    obj? (case (. a typ)
-           'lin (proclin a)
-           'lns (proclns a)
-           'lvl (dyn *indlvl* *linepos*
-                  (proclns a))
-           'ind (procind a)
-           'lvlind (dyn *indlvl* *linepos*
-                     (procind a))
-           'wind (procwind a)
-           'rt (proclin1 (. a dat))
-           (err proclin1 "Unknown type a = $1" a))
-    syn? (emit (str a))
-    str? (emit a)
-    (err proclin1 "Unknown type a = $1" a)))
-
+; process lns objects
 (def proclns (a)
-  (proclnslis (rflat (. a dat))))
+  (dyn *freshln* nil
+    (var fst t)
+    (each x (rflat (. a dat))
+      (if (no x) (cont))
+      (if fst (= fst nil)
+          (newln))
+      (proc1 x))))
 
-(def proclnslis (a)
-  (if (no a) nil
-      (no (car a)) (proclnslis (cdr a))
-      (do (proclns1 (car a))
-          (proclnslis2 (cdr a)))))
-          
-(def proclnslis2 (a)
-  (if (no a) nil
-      (no (car a)) (proclnslis2 (cdr a))
-      (do (newln)
-          (proclns1 (car a))
-          (proclnslis2 (cdr a)))))
-
-(def proclns1 (a)
-  (case a
-    obj? (case (. a typ)
-           'lin (proclin a)
-           'lns (proclns a)
-           'lvl (proclns a)
-           'ind (procind a)
-           'lvlind (procind a)
-           'wind (procwind a)
-           'rt (proclns1 (. a dat))
-           (err proclns1 "Unknown type a = $1" a))
-    syn? (emit (str a))
-    str? (emit a)
-    (err proclns1 "Unknown type a = $1" a)))
+; process flns objects
+(def procflns (a)
+  (dyn *freshln* t
+    (var fst t)
+    (each x (rflat (. a dat))
+      (if (no x) (cont))
+      (if fst (= fst nil)
+          (freshln))
+      (proc1 x))))
 
 (def procind (a)
   (dyn *indlvl* (+ *indlvl* (. a n))
