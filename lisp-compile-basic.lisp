@@ -676,9 +676,11 @@ hey
 (var *indented* nil)
 
 ; don't send "\n" to emit
+; *begline* is t after \n is printed til the first text is emitted
+; *indented* is t after indentation til \n is printed
 
 (def emit (a)
-  ;(al "a = $1 | *indlvl* = $2 | *begline* = $3 | *linepos* = $4" a *indlvl* *begline* *linepos*)
+  ;(bugm 'emit a *indlvl* *begline* *linepos* *indented*)
   (unless *indented* (emitind))
   (unless (is a "")
     (pr a)
