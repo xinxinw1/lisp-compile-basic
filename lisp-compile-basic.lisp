@@ -28,7 +28,7 @@ Examples:
     (if (sym? e)
       (if (smset? e) (send (cons (xsmcal e) a))
           (mset? e) (send (xmcal e a))
-          ;(sset? e) (xspc e a)
+          (sset? e) (xspc e a)
           (cprc e @a))
       (call cal e @a))
     (cmp1ll (car e) (cdr e) a)))
@@ -38,7 +38,7 @@ Examples:
     (if (sym? e)
       (if (smset? e) (send (cons (cons (xsmcal e) a) b))
           (mset? e) (send (cons (xmcal e a) b))
-          ;(sset? e) (call cal (xspc e a) @b)
+          (sset? e) (call cal (xspc e a) @b)
           (mmset? e) (send (xmmcal e a b))
           (call cal (cprc e @a) @b))
       (call cal e @a @b))
@@ -91,10 +91,13 @@ Examples:
 
 ;;; Macros ;;;
 
-;(mkoacc spec s)
+(mkoacc spec s)
 (mkoacc macs m)
 (mkoacc smacs sm)
 (mkoacc mmacs mm)
+
+(def xspc (e a)
+  ((sref e) @a))
 
 (def xmcal (e a)
   ((mref e) @a))
@@ -108,12 +111,71 @@ Examples:
 (mac xmac (nm ag . bd)
   `(mput ',(app 'js- nm) (fn ,ag ,@bd)))
 
-(xmac exe (a)
-  (evl (cons 'do a)))
+(xmac exe a
+  (evl `(do ,@a)))
 
 (xmac mac (nm ag . bd)
   (mput nm (evl `(fn ,ag ,@bd)))
   nil)
+
+(xmac dmac (nm)
+  (mdel nm)
+  nil)
+
+(xmac rmac (fr to)
+  (mren fr to)
+  nil)
+
+(xmac smac (nm . bd)
+  (smput nm (evl `(fn () ,@bd)))
+  nil)
+
+(xmac dsmac (nm)
+  (smdel nm)
+  nil)
+
+(xmac rsmac (fr to)
+  (smren fr to)
+  nil)
+
+(xmac mmac (nm ag1 ag2 . bd)
+  (mmput nm (evl `(fn (,ag1 ,ag2) ,@bd)))
+  nil)
+
+(xmac dsmac (nm)
+  (mmdel nm)
+  nil)
+
+(xmac rsmac (fr to)
+  (mmren fr to)
+  nil)
+
+
+(mac xspec (nm ag . bd)
+  `(sput ',(app 'js- nm) (fn ,ag ,@bd)))
+
+(xspec cdo1 (a . bd)
+  (let r (send a)
+    (send `(do ,@bd))
+    r))
+
+(xspec mblk a
+  (mlay)
+  (let r (send `(do ,@a))
+    (mulay)
+    r))
+
+(xspec smblk a
+  (smlay)
+  (let r (send `(do ,@a))
+    (smulay)
+    r))
+
+(xspec mmblk a
+  (mmlay)
+  (let r (send `(do ,@a))
+    (mmulay)
+    r))
 
 ;;; Places ;;;
 
@@ -228,7 +290,7 @@ Examples:
   (has #"^[a-zA-Z$_][a-zA-Z0-9$_]*$" a))
 
 (def var? (a)
-  (has #"^[a-zA-Z$_][a-zA-Z0-9$_?-]*$" a))
+  (has #"^\*?[a-zA-Z$_*/+-^=!][a-zA-Z0-9$_*/+-^=!?-]*\*?$" a))
 
 (def jvar (a)
   (if (jvar? a) (str a)
@@ -236,8 +298,14 @@ Examples:
         (let s ""
           (idx i a
             (case (a i)
-              '- (do (app= s (upp (a (+ i 1))))
-                      (++ i))
+              '- (if (is i 0) (app= s "sub")
+                   (do (app= s (upp (a (+ i 1))))
+                       (++ i)))
+              '* (app= s "mul")
+              '/ (app= s "div")
+              '+ (app= s "add")
+              '^ (app= s "pow")
+              '! (app= s "bang")
               '? (app= s "p")
               (app= s (a i))))
           s)
