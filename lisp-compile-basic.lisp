@@ -304,6 +304,7 @@ Examples:
   (. a opt bra))
 
 (def needbra? (a)
+  ;(bug a (. a opt) (ohas (. a opt) 'bra) (bra? a))
   (unless (is (. a typ) 'rt) (err needbra? "a = $1 must be a rt" a))
   (and (ohas (. a opt) 'bra)
        (bra? a)))
