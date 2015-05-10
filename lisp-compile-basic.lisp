@@ -135,7 +135,7 @@ Examples:
   `(mput ',(app 'js- nm) (fn ,ag ,@bd)))
 
 (xmac exe a
-  (evl `(do ,@a)))
+  (gevl `(do ,@a)))
 
 (xmac mac (nm ag . bd)
   (mput nm (evl `(fn ,ag ,@bd)))
