@@ -90,7 +90,7 @@ Examples:
 (mac defprc (nm ag . bd)
   `(= (. *prcs* ,nm)
       (fn ,ag
-        (blk ,nm
+        (block ,nm
           (mwith ((chan (a) `(retfr ,,nm (send ,a)))
                   (pass (p . a)
                     `(retfr ,,nm (call ,p ,@a))))
@@ -129,8 +129,8 @@ Examples:
 (def xmmcal (e a b)
   ((mmref e) a b))
 
-; (xmac ...) should be the same thing as running
-;   (js-mac ...) in the compiler
+; (xmac name ...) should be the same thing as running
+;   (js-mac js-name ...) in the compiler
 (mac xmac (nm ag . bd)
   `(mput ',(app 'js- nm) (fn ,ag ,@bd)))
 
@@ -173,6 +173,12 @@ Examples:
   (mmren fr to)
   nil)
 
+(mac xsmac (nm . bd)
+  `(smput ',(app 'js- nm) (fn () ,@bd)))
+
+(xsmac nil
+  `(arr))
+
 ; special procedures are not compiled again after they are run
 ; this means the return value should already be compiled
 (mac xspec (nm ag . bd)
@@ -183,19 +189,19 @@ Examples:
     (send `(do ,@bd))
     r))
 
-(xspec mblk a
+(xspec mblock a
   (mlay)
   (let r (send `(do ,@a))
     (mulay)
     r))
 
-(xspec smblk a
+(xspec smblock a
   (smlay)
   (let r (send `(do ,@a))
     (smulay)
     r))
 
-(xspec mmblk a
+(xspec mmblock a
   (mmlay)
   (let r (send `(do ,@a))
     (mmulay)
@@ -414,6 +420,22 @@ Examples:
 
 (def mpar (a)
   (lin "(" (btwa (cpa 'inln a) ", ") ")"))
+
+(defprc arr a
+  (lin "[" (btwa (cpa 'inln a) ", ") "]"))
+
+(defprc qt (a)
+  (case a
+    nil? (chan nil)
+    num? (pass num a)
+    sym? (pass str (str a))
+    str? (pass str a)
+    lis? (clis a)
+    (err qt "Unknown obj a = $1" a)))
+
+(def clis (a)
+  (if (no a) (chan nil)
+      (lin "[" (call qt (car a)) ", " (call qt (cdr a)) "]")))
 
 (defprc do a
   (if (no a) (chan nil)
