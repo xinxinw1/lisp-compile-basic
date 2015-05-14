@@ -23,12 +23,12 @@ Examples:
 
 (def comp (a)
   (if (atm? a)
-    (case a
-      nil? (comp 'nil)
-      num? (call num a)
-      sym? (if (smset? a) (comp (xsmcall a))
+    (casetyp a
+      nil (comp 'nil)
+      num (call num a)
+      sym (if (smset? a) (comp (xsmcall a))
                (call sym a))
-      str? (call str a)
+      str (call str a)
       (err comp "Unknown atom a = $1" a))
     (compl (car a) (cdr a))))
 
@@ -425,12 +425,12 @@ Examples:
 
 (defprc qt (a)
   ;(bug a)
-  (case a
-    nil? (chan nil)
-    num? (pass num a)
-    sym? (pass str (str a))
-    str? (pass str a)
-    lis? (cqtlis a)
+  (casetyp a
+    nil (chan nil)
+    num (pass num a)
+    sym (pass str (str a))
+    str (pass str a)
+    lis (cqtlis a)
     (err qt "Unknown obj a = $1" a)))
 
 (def cqtlis (a)
