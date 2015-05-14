@@ -424,6 +424,7 @@ Examples:
   (lin "[" @(btwa (compall 'inln a) ", ") "]"))
 
 (defprc qt (a)
+  ;(bug a)
   (case a
     nil? (chan nil)
     num? (pass num a)
