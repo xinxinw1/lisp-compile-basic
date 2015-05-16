@@ -27,7 +27,7 @@ Examples:
       nil (comp 'nil)
       num (call num a)
       sym (if (smset? a) (comp (xsmcall a))
-               (call sym a))
+              (call sym a))
       str (call str a)
       (err comp "Unknown atom a = $1" a))
     (compl (car a) (cdr a))))
