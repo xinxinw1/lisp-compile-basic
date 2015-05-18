@@ -487,7 +487,7 @@ Examples:
 (defbra doln inln)
 
 (def redun? (a)
-  (bug a)
+  ;(bug a)
   ;(al "orig = $1" (. a opt orig))
   (and (is (. a tp) 'sym) (is (. a opt orig) "nil")))
 
