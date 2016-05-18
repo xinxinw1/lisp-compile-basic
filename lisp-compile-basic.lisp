@@ -33,7 +33,7 @@ Examples:
            ,@rst))))
 
 ; (comp a) -> Format object (lin, lns, etc)
-; it should actually be a "placed Return object" (ie. (place (ret-obj 'if (lin "a" "b"))) )
+; it should actually be a "placed Format object" (ie. (place 'if-obj (lin "a" "b")) )
 (def comp (a)
   (if (atm? a)
     (if (and (sym? a) (symbol-macro-set? a))
@@ -78,7 +78,8 @@ Examples:
   `(= (*function-compile-table* ',type) ,f))
 
 (def comp-apply-fn (nm args)
-  (no-nil (err comp-apply-fn "Unknown function nm = $1" nm)
+  (no-nil (if (is nm 'call) (err comp-apply-fn "Unknown function nm = $1" nm)
+              (comp `(call ,nm ,@args)))
     f (*function-compile-table* nm)
     (f @args)))
 
@@ -243,6 +244,15 @@ Examples:
 
 (set-function-compile-fn qt comp-qt)
 
+(def make-in-line (a)
+  (lin @(btwa (map [comp-in-place 'in-line _] a) ", ")))
+
+(def comp-call (nm . args)
+  (place 'fn-call-obj
+    (lin (comp-in-place 'fn-being-called nm) "(" (make-in-line args) ")")))
+
+(set-function-compile-fn call comp-call)
+
 (def comp-lis a
   (if (no a) (comp nil)
       (comp `(arr ,(car a) (lis ,@(cdr a))))))
@@ -250,7 +260,7 @@ Examples:
 (set-function-compile-fn lis comp-lis)
 
 (def comp-arr a
-  (place 'arr-obj (lin "[" @(btwa (map [comp-in-place 'in-line _] a) ", ") "]")))
+  (place 'arr-obj (lin "[" (make-in-line a) "]")))
 
 (set-function-compile-fn arr comp-arr)
 

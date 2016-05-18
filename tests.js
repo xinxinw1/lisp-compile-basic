@@ -11,6 +11,9 @@ QUnit.test('Compiler', function (assert){
   assert.testcmp("*", "mul;");
   assert.testcmp("\"test\"", "\"test\";");
   assert.testcmp("()", "[];");
+  assert.testevl("(make-in-line '(1 2 3))", "<lin {data (\"1\" \", \" \"2\" \", \" \"3\")}>");
+  assert.testcmp("(random-function 1 2 3)", "randomFunction(1, 2, 3);");
+  
   assert.testcmp("(arr 1 2 3)", "[1, 2, 3];");
   assert.testcmp("(arr (do 1 2) 2 3)", "[(1, 2), 2, 3];");
   assert.testcmp("(do 1 2 3)", "1;\n2;\n3;");
