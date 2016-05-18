@@ -16,11 +16,12 @@
   
   L.evlf($.libdir + "/lisp-format/lisp-format.lisp");
   L.evlf($.libdir + "/lisp-compile-basic/lisp-compile-basic.lisp");
-  L.jcal("compprocstr", L.st($.get($.libdir + "/lisp-compile-basic/lisp-cmp-core.lisp")));
+  //L.jcal("compile", L.st($.get($.libdir + "/lisp-compile-basic/lisp-cmp-core.lisp")));
   
   // s is a lisp string
+  // returns a lisp string
   function lispCompile(s){
-    L.jcal("compprocprn", s);
+    return L.jcal("compile", s);
   }
   
   ////// Object exposure //////
