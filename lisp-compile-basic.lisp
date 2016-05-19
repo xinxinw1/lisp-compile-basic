@@ -12,7 +12,7 @@ Examples:
 ;;; Main compile ;;;
 
 (def compile (a)
-  (proc (comp (prs a))))
+  (proc (bug (pip 'root (comp (prs a))))))
 
 ; numbers are sent to the call js procedure
 ; symbols are sent to sym
@@ -23,22 +23,22 @@ Examples:
 
 (var *atom-compile-table* {})
 
-(mac set-atom-compile-fn (type f)
+(mac set-atom-compile-fn1 (type f)
   `(= (*atom-compile-table* ',type) ,f))
 
-(mac no-nil (err-expr v object . rst)
-  `(let #rand ,object
-     (if (nil? #rand) ,err-expr
-         (let ,v #rand
-           ,@rst))))
+(by 2 set-atom-compile-fn set-atom-compile-fn1)
 
-; (comp a) -> Format object (lin, lns, etc)
-; it should actually be a "placed Format object" (ie. (place 'if-obj (lin "a" "b")) )
+(mac not-nil (err-expr v object . rst)
+  (once object
+    `(if (nil? ,object) ,err-expr
+         (let ,v ,object ,@rst))))
+
+; (comp a) -> Return object
 (def comp (a)
   (if (atm? a)
     (if (and (sym? a) (symbol-macro-set? a))
           (comp (symbol-macro-call a))
-        (no-nil (err comp "Unknown atom a = $1" a)
+        (not-nil (err comp "Unknown atom a = $1" a)
           f (*atom-compile-table* (typ a))
           (f a)))
     (comp-list (car a) (cdr a))))
@@ -78,10 +78,18 @@ Examples:
   `(= (*function-compile-table* ',type) ,f))
 
 (def comp-apply-fn (nm args)
-  (no-nil (if (is nm 'call) (err comp-apply-fn "Unknown function nm = $1" nm)
+  (not-nil (if (is nm 'call) (err comp-apply-fn "Unknown function nm = $1" nm)
               (comp `(call ,nm ,@args)))
     f (*function-compile-table* nm)
     (f @args)))
+
+;;; Return object ;;;
+
+(def ret-obj (ret-type format-obj (o opts {}))
+  (mkdat 'ret format-obj (app {ret-type ret-type} opts)))
+
+(def get-ret-type (ret-obj)
+  (ret-obj 'ret-type))
 
 ;;; Places ;;;
 
@@ -89,19 +97,28 @@ Examples:
 
 (def curr-place () (car *places*))
 
-(def comp-in-place (p a)
-  (sta *places* p
-    (comp a)))
+(mac in-place (p . bd)
+  `(sta *places* ,p ,@bd))
+
+; pip = place in place
+(mac pip (p a)
+  `(in-place ,p
+     (place ,a)))
+
+(def comp-and-pip (p a)
+  (pip p (comp a)))
 
 (def place (ret-type format-obj)
   format-obj)
 
 ;;; Macros ;;;
 
-(with-object-accessors spec spec-)
-(with-object-accessors macs macro-)
-(with-object-accessors smacs symbol-macro-)
-(with-object-accessors mmacs macro-macro-)
+(with-object-accessors
+  spec spec-
+  macs macro-
+  smacs symbol-macro-
+  mmacs macro-macro-
+)
 
 ; mmacs can be used to optimize exprs like
 ;   ((dtfn test) a x y z)
@@ -132,8 +149,12 @@ Examples:
   (or (no (curr-place))
       (has (curr-place) *block-places*)))
 
-(def add-block-place (a)
+(def add-block-place1 (a)
   (push a *block-places*))
+
+(by 1 add-block-place add-block-place1)
+
+(add-block-place 'root)
 
 (var *return-places* nil)
 (var *end-places* nil)
@@ -149,25 +170,57 @@ Examples:
 (def block-type? (a)
   (has a *block-types*))
 
-(def add-block-type (a)
+(def add-block-type1 (a)
   (push a *block-types*))
+
+(by 1 add-block-type add-block-type1)
 
 ; *require-bracket-pairs* is a list of lists
 ; each list is of the form (ret-type place) which specifies that
 ;   when an obj of return type ret-type is placed in place, it requires brackets
+; this should be used to override the precedence table if necessary
 (var *require-bracket-pairs* nil)
 
 (def add-require-bracket-pair (pair)
   (push pair *require-bracket-pairs*))
 
+; this table contains both return types and places
+; a return type needs brackets when being placed into a place
+;   when the position of the type is lower than the position of the place
+(var *precedence-table* '(
+  in-paren loop-beg do-line
+  do-line-obj
+  in-line set-right
+  set-obj
+  add-left add-right sub-left set-left
+  add-obj sub-obj
+  mul-left mul-right div-left sub-right
+  mul-obj div-obj
+  div-right fn-being-called
+  atom-obj nil-obj arr-obj fn-call-obj
+))
+
+(mac not-neg-one (object err-expr)
+  (once object
+    `(if (is ,object -1) ,err-expr
+         ,object)))
+
+(def get-precedence (a)
+  (or (pos a *precedence-table*)
+    (err get-precedence "Item $1 doesn't exist in the precedence table" a)))
+
 (def requires-brackets? (ret-type place)
   ;(bug ret-type place *require-bracket-pairs*)
-  (has [iso _ (lis ret-type place)] *require-bracket-pairs*))
+  (or (has [iso _ (lis ret-type place)] *require-bracket-pairs*)
+      (< (get-precedence ret-type) (get-precedence place))))
 
-(def redundant? (a)
-  ;(bug a)
-  ;(al "orig = $1" (. a opt orig))
-  (and (is (. a tp) 'sym) (is (. a opt orig) "nil")))
+(var *skippable-in-do-types* nil)
+
+(def skippable-in-do? (ret-obj)
+  (has (get-ret-type ret-obj) *skippable-in-do-types*))
+
+(def add-skippable-in-do-type (a)
+  (push a *skippable-in-do-types*))
 
 (def needs-brackets-when-placing? (ret-type place)
   nil)
@@ -175,17 +228,20 @@ Examples:
 (def with-braces (a)
   (lns "{" (ind 2 a) "}"))
 
-(def place (ret-type format-obj)
-  (if (block-place?)
-        (if (block-type? ret-type) format-obj
-            (return-place?) (lin "return " format-obj ";")
-            (lin format-obj ";"))
-      (block-type? ret-type)
-        (err place "Can't place obj $1 of block type $2 inside inline place $3"
-                   format-obj ret-type (curr-place))
-      (requires-brackets? ret-type (curr-place))
-        (lin "(" format-obj ")")
-      format-obj))
+; (place return-obj) -> Format obj
+(def place (return-obj)
+  (with (ret-type (get-ret-type return-obj) format-obj (dat return-obj))
+    ;(bug ret-type format-obj (block-place?) (block-type? ret-type))
+    (if (block-place?)
+          (if (block-type? ret-type) format-obj
+              (return-place?) (lin "return " format-obj ";")
+              (lin format-obj ";"))
+        (block-type? ret-type)
+          (err place "Can't place obj $1 of block type $2 inside inline place $3"
+                     format-obj ret-type (curr-place))
+        (requires-brackets? ret-type (curr-place))
+          (lin "(" format-obj ")")
+        format-obj)))
 
 ; is a already a js variable
 (def js-var? (a)
@@ -228,10 +284,16 @@ Examples:
 
 ;;; Compiling Functions ;;;
 
-(set-atom-compile-fn nil [comp `(arr)])
-(set-atom-compile-fn num [place 'atom (str _)])
-(set-atom-compile-fn str [place 'atom (dsp _)])
-(set-atom-compile-fn sym [place 'atom (js-var _)])
+(set-atom-compile-fn
+  nil [ret-obj 'nil-obj (dat (comp `(arr)))]
+  num [ret-obj 'atom-obj (str _)]
+  str [ret-obj 'atom-obj (dsp _)]
+  sym [ret-obj 'atom-obj (js-var _)]
+)
+
+(add-skippable-in-do-type 'nil-obj)
+
+;(add-skippable-in-do-type 'atom-obj)
 
 (def comp-qt (a)
   (casetyp a
@@ -245,13 +307,29 @@ Examples:
 (set-function-compile-fn qt comp-qt)
 
 (def make-in-line (a)
-  (lin @(btwa (map [comp-in-place 'in-line _] a) ", ")))
+  (lin @(btwa (map [comp-and-pip 'in-line _] a) ", ")))
 
 (def comp-call (nm . args)
-  (place 'fn-call-obj
-    (lin (comp-in-place 'fn-being-called nm) "(" (make-in-line args) ")")))
+  (ret-obj 'fn-call-obj
+    (lin (comp-and-pip 'fn-being-called nm) "(" (make-in-line args) ")")))
 
 (set-function-compile-fn call comp-call)
+
+(mac make-comp-bin1 (nm op)
+  `(do (def ,(app 'comp-js- nm) (a b)
+         (ret-obj ',(app nm '-obj)
+            (lin (comp-and-pip ',(app nm '-left) a) ,op (comp-and-pip ',(app nm '-right) b))))
+       (set-function-compile-fn ,(app 'js- nm) ,(app 'comp-js- nm))))
+
+(by 2 make-comp-bin make-comp-bin1)
+
+(make-comp-bin
+  add "+"
+  sub "-"
+  mul "*"
+  div "/"
+  set " = "
+)
 
 (def comp-lis a
   (if (no a) (comp nil)
@@ -260,38 +338,43 @@ Examples:
 (set-function-compile-fn lis comp-lis)
 
 (def comp-arr a
-  (place 'arr-obj (lin "[" (make-in-line a) "]")))
+  (ret-obj 'arr-obj (lin "[" (make-in-line a) "]")))
 
 (set-function-compile-fn arr comp-arr)
+;(add-skippable-in-do-type 'arr-obj)
 
 (def comp-do a
   (if (no a) (comp nil)
       (no (cdr a)) (comp (car a))
-      (no (block-place?)) (comp-doln @a)
-      (comp-do-always @a)))
+      (block-place?) (comp-do-block @a)
+      (comp-do-line @a)))
 
-(def comp-do-always a
-  (if (no (cdr a)) (comp-in-place 'do-last (car a))
-      (place 'do-obj (lns (comp-in-place 'do (car a)) (comp-do-always @(cdr a))))))
+(def comp-do-block a
+  (let fst-obj (in-place 'do (comp (car a)))
+    (if (skippable-in-do? fst-obj) (comp-do @(cdr a))
+        (ret-obj 'do-obj
+          (lns (pip 'do fst-obj)
+               (pip 'do-last (comp-do @(cdr a))))))))
 
-(def comp-doln a
-  (if (no a) (comp nil)
-      (no (cdr a)) (comp (car a))
-      (place 'do-line-obj (lin (comp-in-place 'do-line (car a)) ", " (comp-doln @(cdr a))))))
+(def comp-do-line a
+  (let fst-obj (in-place 'do-line (comp (car a)))
+    (if (skippable-in-do? fst-obj) (comp-do @(cdr a))
+        (ret-obj 'do-line-obj
+          (lin (pip 'do-line (comp (car a))) ", "
+               (pip 'do-line (comp-do @(cdr a))))))))
 
-(add-block-place 'do)
-(add-block-place 'do-last)
+(add-block-place 'do 'do-last)
 (add-block-type 'do-obj)
 
-(add-require-bracket-pair '(do-line-obj in-line))
+;(add-require-bracket-pair '(do-line-obj in-line))
 
 (set-function-compile-fn do comp-do)
 
 (def comp-while (ts . bd)
-  (place 'loop-obj
-    (lin "while (" (comp-in-place 'in-paren ts) ")"
+  (ret-obj 'loop-obj
+    (lin "while (" (comp-and-pip 'in-paren ts) ")"
       (if (no bd) ";"
-          (with-braces (comp-in-place 'loop-body `(do ,@bd)))))))
+          (with-braces (pip 'loop-body (comp-do @bd)))))))
 
 (add-block-place 'loop-body)
 (add-block-type 'loop-obj)
@@ -299,11 +382,11 @@ Examples:
 (set-function-compile-fn while comp-while)
 
 (def comp-loop (start pred update . bd)
-  (place 'loop-obj
-    (lin "for (" (comp-in-place 'loop-beg start) "; "
-                 (comp-in-place 'in-paren pred) "; "
-                 (comp-in-place 'in-paren update) ")"
+  (ret-obj 'loop-obj
+    (lin "for (" (comp-and-pip 'loop-beg start) "; "
+                 (comp-and-pip 'in-paren pred) "; "
+                 (comp-and-pip 'in-paren update) ")"
          (if (no bd) ";"
-             (with-braces (comp-in-place 'loop-body `(do ,@bd)))))))
+             (with-braces (pip 'loop-body (comp-do @bd)))))))
 
 (set-function-compile-fn loop comp-loop)
