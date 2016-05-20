@@ -29,10 +29,12 @@ QUnit.test('Compiler', function (assert){
   assert.testcmp("(arr (do 1 2))", "[(1, 2)];");
   assert.testcmp("'(1 2 3)", "[1, [2, [3, []]]];");
   assert.testcmp("(while t)", "while (t);");
+  assert.testcmp("(while t 1)", "while (t)1;");
   assert.testcmp("(while t 1 2 3)", "while (t){\n  1;\n  2;\n  3;\n}");
   assert.testcmp("(while t (do 1 2 3))", "while (t){\n  1;\n  2;\n  3;\n}");
   
   assert.testcmp("(loop 2 3 4)", "for (2; 3; 4);");
+  assert.testcmp("(loop 2 3 4 5)", "for (2; 3; 4)5;");
   assert.testcmp("(loop 2 3 4 5 6 7)", "for (2; 3; 4){\n  5;\n  6;\n  7;\n}");
   
   assert.testcmp("(do 1 () 3)", "1;\n3;");
@@ -79,4 +81,13 @@ QUnit.test('Compiler', function (assert){
   assert.testcmp("(js-set 1 (js-set 2 3))", "1 = 2 = 3;");
   
   assert.testcmp("(arr (js-set 1 2))", "[1 = 2];");
+  
+  assert.testcmp("(if 1 2)", "if (1)2;");
+  assert.testcmp("(if 1 2 3)", "if (1)2;\nelse 3;");
+  assert.testcmp("(if 1 (do 2 3))", "if (1){\n  2;\n  3;\n}");
+  assert.testcmp("(if 1 (do 2 3) 3)", "if (1){\n  2;\n  3;\n} else 3;");
+  assert.testcmp("(if 1 (do 2 3) (do 3 4))", "if (1){\n  2;\n  3;\n} else {\n  3;\n  4;\n}");
+  assert.testcmp("(if 1 (do 2 3) 3 4)", "if (1){\n  2;\n  3;\n} else if (3)4;");
+  assert.testcmp("(if 1 (do 2 3) 3 (do 4 5))", "if (1){\n  2;\n  3;\n} else if (3){\n  4;\n  5;\n}");
+  assert.testcmp("(if 1 (do 2 3) (if 3 (do 4 5)))", "if (1){\n  2;\n  3;\n} else if (3){\n  4;\n  5;\n}");
 });

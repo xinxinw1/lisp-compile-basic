@@ -225,8 +225,35 @@ Examples:
 (def needs-brackets-when-placing? (ret-type place)
   nil)
 
+; *require-brace-pairs* is a list of lists
+; each list is of the form (ret-type place) which specifies that
+;   when an obj of return type ret-type is placed in place, it requires braces
+
+(var *require-brace-pairs* nil)
+
+(def add-require-brace-pair (pair)
+  (push pair *require-brace-pairs*))
+
+(def requires-braces? (ret-type place)
+  ;(bug ret-type place *require-bracket-pairs*)
+  (has [iso _ (lis ret-type place)] *require-brace-pairs*))
+
 (def with-braces (a)
   (lns "{" (ind 2 a) "}"))
+
+(def with-braces-if-needed (ret-type place a)
+  (if (requires-braces? ret-type place) (with-braces a) a))
+
+(def list-with-braces-if-needed (ret-type place a)
+  (let r (requires-braces? ret-type place)
+    (lis r (if r (with-braces a) a))))
+
+; a must be a Return object
+(def place-with-braces-if-needed (a)
+  (with-braces-if-needed (get-ret-type a) (curr-place) (place a)))
+
+(def list-place-with-braces-if-needed (a)
+  (list-with-braces-if-needed (get-ret-type a) (curr-place) (place a)))
 
 ; (place return-obj) -> Format obj
 (def place (return-obj)
@@ -374,19 +401,44 @@ Examples:
   (ret-obj 'loop-obj
     (lin "while (" (comp-and-pip 'in-paren ts) ")"
       (if (no bd) ";"
-          (with-braces (pip 'loop-body (comp-do @bd)))))))
+          (in-place 'loop-body (place-with-braces-if-needed (comp-do @bd)))))))
 
 (add-block-place 'loop-body)
 (add-block-type 'loop-obj)
 
 (set-function-compile-fn while comp-while)
 
-(def comp-loop (start pred update . bd)
+(def comp-loop (start ts update . bd)
   (ret-obj 'loop-obj
     (lin "for (" (comp-and-pip 'loop-beg start) "; "
-                 (comp-and-pip 'in-paren pred) "; "
+                 (comp-and-pip 'in-paren ts) "; "
                  (comp-and-pip 'in-paren update) ")"
          (if (no bd) ";"
-             (with-braces (pip 'loop-body (comp-do @bd)))))))
+             (in-place 'loop-body (place-with-braces-if-needed (comp-do @bd)))))))
+
+(add-require-brace-pair '(do-obj loop-body))
 
 (set-function-compile-fn loop comp-loop)
+
+(def comp-if a
+  (if (no a) (comp nil)
+      (no (cdr a)) (comp (car a))
+      (block-place?) (comp-if-block @a)
+      (comp-if-line @a)))
+
+(def comp-if-block (ts true-expr . rst)
+  (ret-obj 'if-obj
+    (lin "if (" (comp-and-pip 'in-paren ts) ")"
+         (let (needed-braces format-obj) (in-place 'if-body (list-place-with-braces-if-needed (comp true-expr)))
+           (if (no rst) format-obj
+               (let result (in-place 'else-body (place-with-braces-if-needed (comp-if @rst)))
+                 (if needed-braces (lin format-obj " else " result)
+                     (lns format-obj (lin "else " result)))))))))
+
+(add-require-brace-pair '(do-obj if-body))
+(add-require-brace-pair '(do-obj else-body))
+
+(add-block-place 'if-body 'else-body)
+(add-block-type 'if-obj)
+
+(set-function-compile-fn if comp-if)
