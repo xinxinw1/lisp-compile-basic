@@ -190,8 +190,10 @@ Examples:
 (var *precedence-table* '(
   in-paren loop-beg do-line
   do-line-obj
-  in-line set-right
+  in-line if-line-yes if-line-no set-right
   set-obj
+  if-line-test
+  if-line-obj
   add-left add-right sub-left set-left
   add-obj sub-obj
   mul-left mul-right div-left sub-right
@@ -434,6 +436,12 @@ Examples:
                (let result (in-place 'else-body (place-with-braces-if-needed (comp-if @rst)))
                  (if needed-braces (lin format-obj " else " result)
                      (lns format-obj (lin "else " result)))))))))
+
+(def comp-if-line (ts true-expr . rst)
+  (ret-obj 'if-line-obj
+    (lin (comp-and-pip 'if-line-test ts) "?"
+         (comp-and-pip 'if-line-yes true-expr) ":"
+         (pip 'if-line-no (comp-if @rst)))))
 
 (add-require-brace-pair '(do-obj if-body))
 (add-require-brace-pair '(do-obj else-body))

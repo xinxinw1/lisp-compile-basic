@@ -90,4 +90,10 @@ QUnit.test('Compiler', function (assert){
   assert.testcmp("(if 1 (do 2 3) 3 4)", "if (1){\n  2;\n  3;\n} else if (3)4;");
   assert.testcmp("(if 1 (do 2 3) 3 (do 4 5))", "if (1){\n  2;\n  3;\n} else if (3){\n  4;\n  5;\n}");
   assert.testcmp("(if 1 (do 2 3) (if 3 (do 4 5)))", "if (1){\n  2;\n  3;\n} else if (3){\n  4;\n  5;\n}");
+  
+  assert.testcmp("(arr (if 1 2 3))", "[1?2:3];");
+  assert.testcmp("(arr (if 1 2 3 4 5))", "[1?2:3?4:5];");
+  assert.testcmp("(arr (if (if 1 2 3) 2 3 4 5))", "[1?2:3?2:3?4:5];");
+  assert.testcmp("(arr (if (do 1 2) 2 3))", "[(1, 2)?2:3];");
+  assert.testcmp("(arr (if (js-set 1 2) 2 3))", "[(1 = 2)?2:3];");
 });
