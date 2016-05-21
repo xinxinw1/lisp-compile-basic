@@ -1,4 +1,10 @@
 QUnit.test('Compiler', function (assert){
+  assert.testevl("(ret-obj 'test 3)", "<ret {ret-type test flags {} data 3}>");
+  assert.testevl("(ret-obj 'test 3 {a t})", "<ret {ret-type test flags {a t} data 3}>");
+  assert.testevl("(get-ret-type (ret-obj 'test 3))", "test");
+  assert.testevl("(get-ret-flag (ret-obj 'test 3 {a t}) 'a)", "t");
+  assert.testevl("(ret-obj-flags 'test (set-ret-flag 'a t) 3)", "<ret {ret-type test flags {a t} data 3}>");
+  
   assert.testevl("(js-var 'a)", "\"a\"");
   assert.testevl("(js-var '-)", "\"sub\"");
   assert.testevl("(js-var 'a-b)", "\"aB\"");
@@ -40,7 +46,7 @@ QUnit.test('Compiler', function (assert){
   assert.testcmp("(do 1 () 3)", "1;\n3;");
   assert.testcmp("(do 1 ())", "1;\n[];");
   
-  assert.testevl("(mcx1 '(make-comp-bin1 test \"+\"))", "(do (def comp-js-test (a b) (ret-obj 'test-obj (lin (comp-and-pip 'test-left a) \"+\" (comp-and-pip 'test-right b)))) (set-function-compile-fn js-test comp-js-test))");
+  //assert.testevl("(mcx1 (mcx1 '(make-comp-bin test \"+\")))", "(do (def comp-js-test (a b) (ret-obj 'test-obj (lin (comp-and-pip 'test-left a) \"+\" (comp-and-pip 'test-right b)))) (set-function-compile-fn js-test comp-js-test))");
   
   assert.testcmp("(js-add 1 2)", "1+2;");
   assert.testcmp("(js-add (js-sub 1 2) 3)", "1-2+3;");
@@ -91,9 +97,14 @@ QUnit.test('Compiler', function (assert){
   assert.testcmp("(if 1 (do 2 3) 3 (do 4 5))", "if (1){\n  2;\n  3;\n} else if (3){\n  4;\n  5;\n}");
   assert.testcmp("(if 1 (do 2 3) (if 3 (do 4 5)))", "if (1){\n  2;\n  3;\n} else if (3){\n  4;\n  5;\n}");
   
+  assert.testcmp("(while t (if 1 2 3))", "while (t){\n  if (1)2;\n  else 3;\n}");
+  
   assert.testcmp("(arr (if 1 2 3))", "[1?2:3];");
   assert.testcmp("(arr (if 1 2 3 4 5))", "[1?2:3?4:5];");
   assert.testcmp("(arr (if (if 1 2 3) 2 3 4 5))", "[1?2:3?2:3?4:5];");
   assert.testcmp("(arr (if (do 1 2) 2 3))", "[(1, 2)?2:3];");
   assert.testcmp("(arr (if (js-set 1 2) 2 3))", "[(1 = 2)?2:3];");
+  
+  assert.testcmp("(return 3)", "return 3;");
+  assert.testcmp("(return (if 1 2 3))", "if (1)return 2;\nelse return 3;");
 });

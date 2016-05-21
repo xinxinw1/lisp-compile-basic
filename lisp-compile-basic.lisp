@@ -23,10 +23,8 @@ Examples:
 
 (var *atom-compile-table* {})
 
-(mac set-atom-compile-fn1 (type f)
+(macby set-atom-compile-fn (type f)
   `(= (*atom-compile-table* ',type) ,f))
-
-(by 2 set-atom-compile-fn set-atom-compile-fn1)
 
 (mac not-nil (err-expr v object . rst)
   (once object
@@ -85,11 +83,19 @@ Examples:
 
 ;;; Return object ;;;
 
-(def ret-obj (ret-type format-obj (o opts {}))
-  (mkdat 'ret format-obj (app {ret-type ret-type} opts)))
+(def ret-obj (ret-type format-obj (o flags {}))
+  (mkdat 'ret format-obj {ret-type ret-type flags flags}))
 
 (def get-ret-type (ret-obj)
   (ret-obj 'ret-type))
+
+(def get-ret-flag (ret-obj flag)
+  (ret-obj 'flags flag))
+
+(mac ret-obj-flags (ret-type . bd)
+  `(let #flags {}
+     (let #format-obj (flet (set-ret-flag (a x) (do (= (#flags a) x) nil)) ,@bd)
+       (ret-obj ,ret-type #format-obj #flags))))
 
 ;;; Places ;;;
 
@@ -149,15 +155,19 @@ Examples:
   (or (no (curr-place))
       (has (curr-place) *block-places*)))
 
-(def add-block-place1 (a)
+(defby add-block-place (a)
   (push a *block-places*))
-
-(by 1 add-block-place add-block-place1)
 
 (add-block-place 'root)
 
 (var *return-places* nil)
 (var *end-places* nil)
+
+(defby add-return-place (a)
+  (push a *return-places*))
+
+(defby add-end-place (a)
+  (push a *end-places*))
 
 (def return-place? ((o places *places*))
   (if (no places) nil
@@ -170,10 +180,8 @@ Examples:
 (def block-type? (a)
   (has a *block-types*))
 
-(def add-block-type1 (a)
+(defby add-block-type (a)
   (push a *block-types*))
-
-(by 1 add-block-type add-block-type1)
 
 ; *require-bracket-pairs* is a list of lists
 ; each list is of the form (ret-type place) which specifies that
@@ -181,7 +189,7 @@ Examples:
 ; this should be used to override the precedence table if necessary
 (var *require-bracket-pairs* nil)
 
-(def add-require-bracket-pair (pair)
+(defby add-require-bracket-pair (pair)
   (push pair *require-bracket-pairs*))
 
 ; this table contains both return types and places
@@ -248,7 +256,7 @@ Examples:
 
 (def list-with-braces-if-needed (ret-type place a)
   (let r (requires-braces? ret-type place)
-    (lis r (if r (with-braces a) a))))
+    (lis (if r (with-braces a) a) r)))
 
 ; a must be a Return object
 (def place-with-braces-if-needed (a)
@@ -257,20 +265,27 @@ Examples:
 (def list-place-with-braces-if-needed (a)
   (list-with-braces-if-needed (get-ret-type a) (curr-place) (place a)))
 
-; (place return-obj) -> Format obj
-(def place (return-obj)
+; (list-place return-obj) -> (<Format obj> <needed-braces>)
+(def list-place (return-obj)
+  (bug return-obj (get-apply-stack))
   (with (ret-type (get-ret-type return-obj) format-obj (dat return-obj))
-    ;(bug ret-type format-obj (block-place?) (block-type? ret-type))
+    (bug ret-type format-obj (block-place?) (block-type? ret-type))
     (if (block-place?)
-          (if (block-type? ret-type) format-obj
-              (return-place?) (lin "return " format-obj ";")
-              (lin format-obj ";"))
+          (list-with-braces-if-needed ret-type (curr-place)
+            (if (block-type? ret-type) format-obj
+                (return-place?) (lin "return " format-obj ";")
+                (lin format-obj ";")))
         (block-type? ret-type)
           (err place "Can't place obj $1 of block type $2 inside inline place $3"
                      format-obj ret-type (curr-place))
-        (requires-brackets? ret-type (curr-place))
-          (lin "(" format-obj ")")
-        format-obj)))
+        (lis
+          (if (requires-brackets? ret-type (curr-place))
+                (lin "(" format-obj ")")
+              format-obj)))))
+
+; (place return-obj) -> Format obj
+(def place (return-obj)
+  (car (list-place return-obj)))
 
 ; is a already a js variable
 (def js-var? (a)
@@ -344,13 +359,11 @@ Examples:
 
 (set-function-compile-fn call comp-call)
 
-(mac make-comp-bin1 (nm op)
+(macby make-comp-bin (nm op)
   `(do (def ,(app 'comp-js- nm) (a b)
          (ret-obj ',(app nm '-obj)
             (lin (comp-and-pip ',(app nm '-left) a) ,op (comp-and-pip ',(app nm '-right) b))))
        (set-function-compile-fn ,(app 'js- nm) ,(app 'comp-js- nm))))
-
-(by 2 make-comp-bin make-comp-bin1)
 
 (make-comp-bin
   add "+"
@@ -403,7 +416,7 @@ Examples:
   (ret-obj 'loop-obj
     (lin "while (" (comp-and-pip 'in-paren ts) ")"
       (if (no bd) ";"
-          (in-place 'loop-body (place-with-braces-if-needed (comp-do @bd)))))))
+          (in-place 'loop-body (place (comp-do @bd)))))))
 
 (add-block-place 'loop-body)
 (add-block-type 'loop-obj)
@@ -416,7 +429,7 @@ Examples:
                  (comp-and-pip 'in-paren ts) "; "
                  (comp-and-pip 'in-paren update) ")"
          (if (no bd) ";"
-             (in-place 'loop-body (place-with-braces-if-needed (comp-do @bd)))))))
+             (in-place 'loop-body (place (comp-do @bd)))))))
 
 (add-require-brace-pair '(do-obj loop-body))
 
@@ -431,11 +444,13 @@ Examples:
 (def comp-if-block (ts true-expr . rst)
   (ret-obj 'if-obj
     (lin "if (" (comp-and-pip 'in-paren ts) ")"
-         (let (needed-braces format-obj) (in-place 'if-body (list-place-with-braces-if-needed (comp true-expr)))
+         (let (format-obj needed-braces) (in-place 'if-body (list-place (comp true-expr)))
            (if (no rst) format-obj
-               (let result (in-place 'else-body (place-with-braces-if-needed (comp-if @rst)))
+               (let result (in-place 'else-body (place (comp-if @rst)))
                  (if needed-braces (lin format-obj " else " result)
                      (lns format-obj (lin "else " result)))))))))
+
+(add-require-brace-pair '(if-obj loop-body))
 
 (def comp-if-line (ts true-expr . rst)
   (ret-obj 'if-line-obj
@@ -449,4 +464,18 @@ Examples:
 (add-block-place 'if-body 'else-body)
 (add-block-type 'if-obj)
 
+(add-end-place 'if-body 'else-body)
+
 (set-function-compile-fn if comp-if)
+
+(def comp-return (a)
+  (ret-obj-flags 'return-obj
+    (set-ret-flag 'return t)
+    (comp-and-pip 'return a)))
+
+(add-block-place 'return)
+(add-block-type 'return-obj)
+
+(add-return-place 'return)
+
+(set-function-compile-fn return comp-return)
