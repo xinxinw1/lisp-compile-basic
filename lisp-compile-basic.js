@@ -24,10 +24,17 @@
     return L.jcal("compile", s);
   }
   
+  // s is a js string
+  // returns a js string
+  function cmps(s){
+    return L.dat(L.lispCompile(L.st(s)));
+  }
+  
   ////// Object exposure //////
   
   $.att(L, {
-    lispCompile: lispCompile
+    lispCompile: lispCompile,
+    cmps: cmps
   });
   
   ////// Testing //////

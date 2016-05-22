@@ -12,7 +12,7 @@ Examples:
 ;;; Main compile ;;;
 
 (def compile (a)
-  (proc (bug (pip 'root (comp (prs a))))))
+  (proc (bug (cip-and-fobj 'root (prs a)))))
 
 ; numbers are sent to the call js procedure
 ; symbols are sent to sym
@@ -31,7 +31,7 @@ Examples:
     `(if (nil? ,object) ,err-expr
          (let ,v ,object ,@rst))))
 
-; (comp a) -> Return object
+; (comp a) -> Return object which has already been placed
 (def comp (a)
   (if (atm? a)
     (if (and (sym? a) (symbol-macro-set? a))
@@ -83,19 +83,32 @@ Examples:
 
 ;;; Return object ;;;
 
-(def ret-obj (ret-type format-obj (o flags {}))
+(def make-ret-obj (ret-type format-obj (o flags {}))
   (mkdat 'ret format-obj {ret-type ret-type flags flags}))
 
-(def get-ret-type (ret-obj)
-  (ret-obj 'ret-type))
+; fobj = get format object
+(def fobj (a-ret-obj)
+  (dat a-ret-obj))
 
-(def get-ret-flag (ret-obj flag)
-  (ret-obj 'flags flag))
+(def get-ret-type (a-ret-obj)
+  (a-ret-obj 'ret-type))
 
-(mac ret-obj-flags (ret-type . bd)
+(def get-ret-flags (a-ret-obj)
+  (a-ret-obj 'flags))
+
+(def get-ret-flag (a-ret-obj flag)
+  (a-ret-obj 'flags flag))
+
+(mac ret-obj (ret-type . bd)
   `(let #flags {}
-     (let #format-obj (flet (set-ret-flag (a x) (do (= (#flags a) x) nil)) ,@bd)
-       (ret-obj ,ret-type #format-obj #flags))))
+     (let #format-obj (fwiths ((set-ret-flag (a x) (do (= (#flags a) x) nil))
+                               (set-ret-flags (a) (do (app= #flags a) nil))
+                               (pass-ret-flags (ret-obj) (do (set-ret-flags (get-ret-flags ret-obj)) ret-obj)))
+                        ,@bd)
+       (make-ret-obj ,ret-type #format-obj #flags))))
+
+(mac place-ret-obj (ret-type . bd)
+  `(place (ret-obj ,ret-type ,@bd)))
 
 ;;; Places ;;;
 
@@ -106,13 +119,12 @@ Examples:
 (mac in-place (p . bd)
   `(sta *places* ,p ,@bd))
 
-; pip = place in place
-(mac pip (p a)
-  `(in-place ,p
-     (place ,a)))
+; compile in place
+(def cip (p a)
+  (in-place p (comp a)))
 
-(def comp-and-pip (p a)
-  (pip p (comp a)))
+(def cip-and-fobj (p a)
+  (fobj (cip p a)))
 
 (def place (ret-type format-obj)
   format-obj)
@@ -239,14 +251,24 @@ Examples:
 ; each list is of the form (ret-type place) which specifies that
 ;   when an obj of return type ret-type is placed in place, it requires braces
 
-(var *require-brace-pairs* nil)
+(var *brace-places* nil)
 
-(def add-require-brace-pair (pair)
-  (push pair *require-brace-pairs*))
+(defby add-brace-place (a)
+  (push a *brace-places*))
+
+; *no-need-brace-pairs* is a list of lists
+; each list is of the form (ret-type place) which specifies that
+;   when an obj of return type ret-type is placed in place, it doesn't requires braces
+
+(var *no-need-brace-pairs* nil)
+
+(def add-no-need-brace-pair (a)
+  (push a *no-need-brace-pairs*))
 
 (def requires-braces? (ret-type place)
   ;(bug ret-type place *require-bracket-pairs*)
-  (has [iso _ (lis ret-type place)] *require-brace-pairs*))
+  (and (has place *brace-places*)
+       (no (has [iso _ (lis ret-type place)] *no-need-brace-pairs*))))
 
 (def with-braces (a)
   (lns "{" (ind 2 a) "}"))
@@ -265,27 +287,29 @@ Examples:
 (def list-place-with-braces-if-needed (a)
   (list-with-braces-if-needed (get-ret-type a) (curr-place) (place a)))
 
-; (list-place return-obj) -> (<Format obj> <needed-braces>)
-(def list-place (return-obj)
-  (bug return-obj (get-apply-stack))
-  (with (ret-type (get-ret-type return-obj) format-obj (dat return-obj))
-    (bug ret-type format-obj (block-place?) (block-type? ret-type))
-    (if (block-place?)
-          (list-with-braces-if-needed ret-type (curr-place)
-            (if (block-type? ret-type) format-obj
-                (return-place?) (lin "return " format-obj ";")
-                (lin format-obj ";")))
-        (block-type? ret-type)
-          (err place "Can't place obj $1 of block type $2 inside inline place $3"
-                     format-obj ret-type (curr-place))
-        (lis
+; (place return-obj) -> return obj
+(def place (return-obj)
+  (with (ret-type (get-ret-type return-obj)
+         format-obj (fobj return-obj)
+         flags (get-ret-flags return-obj))
+    (ret-obj ret-type
+      (set-ret-flags flags)
+      (if (block-place?)
+            (let temp-format-obj (if (block-type? ret-type) format-obj
+                                     (return-place?)
+                                       (do (set-ret-flag 'return t)
+                                           (lin "return " format-obj ";"))
+                                     (lin format-obj ";"))
+              (if (and (requires-braces? ret-type (curr-place))
+                       (get-ret-flag return-obj 'needs-braces))
+                    (with-braces temp-format-obj)
+                  temp-format-obj))
+          (block-type? ret-type)
+            (err place "Can't place obj $1 of block type $2 inside inline place $3"
+                       format-obj ret-type (curr-place))
           (if (requires-brackets? ret-type (curr-place))
                 (lin "(" format-obj ")")
               format-obj)))))
-
-; (place return-obj) -> Format obj
-(def place (return-obj)
-  (car (list-place return-obj)))
 
 ; is a already a js variable
 (def js-var? (a)
@@ -329,10 +353,10 @@ Examples:
 ;;; Compiling Functions ;;;
 
 (set-atom-compile-fn
-  nil [ret-obj 'nil-obj (dat (comp `(arr)))]
-  num [ret-obj 'atom-obj (str _)]
-  str [ret-obj 'atom-obj (dsp _)]
-  sym [ret-obj 'atom-obj (js-var _)]
+  nil [ret-obj 'nil-obj (fobj (pass-ret-flags (comp `(arr))))]
+  num [place-ret-obj 'atom-obj (str _)]
+  str [place-ret-obj 'atom-obj (dsp _)]
+  sym [place-ret-obj 'atom-obj (js-var _)]
 )
 
 (add-skippable-in-do-type 'nil-obj)
@@ -351,18 +375,18 @@ Examples:
 (set-function-compile-fn qt comp-qt)
 
 (def make-in-line (a)
-  (lin @(btwa (map [comp-and-pip 'in-line _] a) ", ")))
+  (lin @(btwa (map [cip-and-fobj 'in-line _] a) ", ")))
 
 (def comp-call (nm . args)
-  (ret-obj 'fn-call-obj
-    (lin (comp-and-pip 'fn-being-called nm) "(" (make-in-line args) ")")))
+  (place-ret-obj 'fn-call-obj
+    (lin (cip-and-fobj 'fn-being-called nm) "(" (make-in-line args) ")")))
 
 (set-function-compile-fn call comp-call)
 
 (macby make-comp-bin (nm op)
   `(do (def ,(app 'comp-js- nm) (a b)
-         (ret-obj ',(app nm '-obj)
-            (lin (comp-and-pip ',(app nm '-left) a) ,op (comp-and-pip ',(app nm '-right) b))))
+         (place-ret-obj ',(app nm '-obj)
+            (lin (cip-and-fobj ',(app nm '-left) a) ,op (cip-and-fobj ',(app nm '-right) b))))
        (set-function-compile-fn ,(app 'js- nm) ,(app 'comp-js- nm))))
 
 (make-comp-bin
@@ -380,7 +404,7 @@ Examples:
 (set-function-compile-fn lis comp-lis)
 
 (def comp-arr a
-  (ret-obj 'arr-obj (lin "[" (make-in-line a) "]")))
+  (place-ret-obj 'arr-obj (lin "[" (make-in-line a) "]")))
 
 (set-function-compile-fn arr comp-arr)
 ;(add-skippable-in-do-type 'arr-obj)
@@ -392,31 +416,35 @@ Examples:
       (comp-do-line @a)))
 
 (def comp-do-block a
-  (let fst-obj (in-place 'do (comp (car a)))
+  (let fst-obj (cip 'do (car a))
     (if (skippable-in-do? fst-obj) (comp-do @(cdr a))
-        (ret-obj 'do-obj
-          (lns (pip 'do fst-obj)
-               (pip 'do-last (comp-do @(cdr a))))))))
+        (place-ret-obj 'do-obj
+          (set-ret-flag 'needs-braces t)
+          (lns (fobj fst-obj)
+               (let rst-obj (in-place 'do-last (comp-do @(cdr a)))
+                 (if (get-ret-flag rst-obj 'return) (set-ret-flag 'return t))
+                 (fobj rst-obj)))))))
 
 (def comp-do-line a
-  (let fst-obj (in-place 'do-line (comp (car a)))
+  (let fst-obj (cip 'do-line (car a))
     (if (skippable-in-do? fst-obj) (comp-do @(cdr a))
-        (ret-obj 'do-line-obj
-          (lin (pip 'do-line (comp (car a))) ", "
-               (pip 'do-line (comp-do @(cdr a))))))))
+        (place-ret-obj 'do-line-obj
+          (lin (fobj fst-obj) ", "
+               (fobj (in-place 'do-line (comp-do @(cdr a)))))))))
 
 (add-block-place 'do 'do-last)
 (add-block-type 'do-obj)
 
-;(add-require-bracket-pair '(do-line-obj in-line))
+(add-end-place 'do-last)
 
 (set-function-compile-fn do comp-do)
 
 (def comp-while (ts . bd)
-  (ret-obj 'loop-obj
-    (lin "while (" (comp-and-pip 'in-paren ts) ")"
+  (place-ret-obj 'loop-obj
+    (set-ret-flag 'needs-braces t)
+    (lin "while (" (cip-and-fobj 'in-paren ts) ")"
       (if (no bd) ";"
-          (in-place 'loop-body (place (comp-do @bd)))))))
+          (fobj (in-place 'loop-body (comp-do @bd)))))))
 
 (add-block-place 'loop-body)
 (add-block-type 'loop-obj)
@@ -424,14 +452,15 @@ Examples:
 (set-function-compile-fn while comp-while)
 
 (def comp-loop (start ts update . bd)
-  (ret-obj 'loop-obj
-    (lin "for (" (comp-and-pip 'loop-beg start) "; "
-                 (comp-and-pip 'in-paren ts) "; "
-                 (comp-and-pip 'in-paren update) ")"
+  (place-ret-obj 'loop-obj
+    (set-ret-flag 'needs-braces t)
+    (lin "for (" (cip-and-fobj 'loop-beg start) "; "
+                 (cip-and-fobj 'in-paren ts) "; "
+                 (cip-and-fobj 'in-paren update) ")"
          (if (no bd) ";"
-             (in-place 'loop-body (place (comp-do @bd)))))))
+             (fobj (in-place 'loop-body (comp-do @bd)))))))
 
-(add-require-brace-pair '(do-obj loop-body))
+(add-brace-place 'loop-body)
 
 (set-function-compile-fn loop comp-loop)
 
@@ -442,36 +471,63 @@ Examples:
       (comp-if-line @a)))
 
 (def comp-if-block (ts true-expr . rst)
-  (ret-obj 'if-obj
-    (lin "if (" (comp-and-pip 'in-paren ts) ")"
-         (let (format-obj needed-braces) (in-place 'if-body (list-place (comp true-expr)))
-           (if (no rst) format-obj
-               (let result (in-place 'else-body (place (comp-if @rst)))
-                 (if needed-braces (lin format-obj " else " result)
-                     (lns format-obj (lin "else " result)))))))))
+  (place-ret-obj 'if-obj
+    (set-ret-flag 'needs-braces t)
+    (withs (test-lin (lin "if (" (cip-and-fobj 'in-paren ts) ")")
+            true-obj (cip 'if-body true-expr)
+            true-format-obj (fobj true-obj)
+            returns (get-ret-flag true-obj 'return))
+      (if (get-ret-flag true-obj 'return)
+            (withs (rest-obj (in-place 'else-after-body (comp-if @rst))
+                    rest-format-obj (fobj rest-obj))
+              (if (get-ret-flag rest-obj 'return)
+                    (do (set-ret-flag 'return t)
+                        (lns (lin test-lin true-format-obj) rest-format-obj))
+                  (no rst)
+                    (lin test-lin true-format-obj)
+                  (lns (lin test-lin true-format-obj) rest-format-obj)))
+          (no rst)
+            (lin test-lin true-format-obj)
+          (withs (rest-obj (in-place 'else-body (comp-if-else-block @rst))
+                  rest-format-obj (fobj rest-obj))
+            (if (get-ret-flag true-obj 'needs-braces)
+                  (lin test-lin true-format-obj " else " rest-format-obj)
+                (lns (lin test-lin true-format-obj) (lin "else " rest-format-obj))))))))
 
-(add-require-brace-pair '(if-obj loop-body))
+(def comp-if-else-block (ts true-expr . rst)
+  (if (no true-expr) (comp ts)
+      (place-ret-obj 'if-obj
+        (withs (test-lin (lin "if (" (cip-and-fobj 'in-paren ts) ")")
+                true-obj (cip 'if-body true-expr)
+                true-format-obj (fobj true-obj))
+          (if (no rst)
+                (lin test-lin true-format-obj)
+              (withs (rest-obj (in-place 'else-body (comp-if-else-block @rst))
+                      rest-format-obj (fobj rest-obj))
+                (if (get-ret-flag true-obj 'needs-braces)
+                      (lin test-lin true-format-obj " else " rest-format-obj)
+                    (lns (lin test-lin true-format-obj) (lin "else " rest-format-obj)))))))))
 
 (def comp-if-line (ts true-expr . rst)
-  (ret-obj 'if-line-obj
-    (lin (comp-and-pip 'if-line-test ts) "?"
-         (comp-and-pip 'if-line-yes true-expr) ":"
-         (pip 'if-line-no (comp-if @rst)))))
+  (place-ret-obj 'if-line-obj
+    (lin (cip-and-fobj 'if-line-test ts) "?"
+         (cip-and-fobj 'if-line-yes true-expr) ":"
+         (fobj (in-place 'if-line-no (comp-if @rst))))))
 
-(add-require-brace-pair '(do-obj if-body))
-(add-require-brace-pair '(do-obj else-body))
+(add-brace-place 'if-body 'else-body)
 
-(add-block-place 'if-body 'else-body)
+(add-no-need-brace-pair '(if-obj else-body))
+
+(add-block-place 'if-body 'else-body 'else-after-body)
 (add-block-type 'if-obj)
 
-(add-end-place 'if-body 'else-body)
+(add-end-place 'if-body 'else-body 'else-after-body)
 
 (set-function-compile-fn if comp-if)
 
 (def comp-return (a)
-  (ret-obj-flags 'return-obj
-    (set-ret-flag 'return t)
-    (comp-and-pip 'return a)))
+  (place-ret-obj 'return-obj
+    (fobj (pass-ret-flags (cip 'return a)))))
 
 (add-block-place 'return)
 (add-block-type 'return-obj)
