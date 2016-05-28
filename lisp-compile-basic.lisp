@@ -208,7 +208,7 @@ Examples:
 ; a return type needs brackets when being placed into a place
 ;   when the position of the type is lower than the position of the place
 (var *precedence-table* '(
-  in-paren loop-beg do-line
+  in-paren loop-beg do-line func-name
   do-line-obj
   in-line if-line-yes if-line-no set-right
   set-obj
@@ -535,3 +535,14 @@ Examples:
 (add-return-place 'return)
 
 (set-function-compile-fn return comp-return)
+
+(def comp-def (nm ag . bd)
+  (place-ret-obj 'def-obj
+    (lin "function " (cip-and-fobj 'func-name nm) "(" (make-in-line ag) ")"
+         (with-braces (fobj (in-place 'func-body (comp-do @bd)))))))
+
+(add-block-place 'func-body)
+(add-block-type 'def-obj)
+(add-return-place 'func-body)
+
+(set-function-compile-fn def comp-def)

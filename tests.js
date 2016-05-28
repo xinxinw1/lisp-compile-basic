@@ -157,3 +157,8 @@ QUnit.test('return', function (assert){
   assert.testcmp("(if 1 (return (do 1 2 3)))", "if (1){\n  1;\n  2;\n  return 3;\n}");
   
 });
+
+QUnit.test('def', function (assert){
+  assert.testcmp("(def test (a) 3)", "function test(a){\n  return 3;\n}");
+  assert.testcmp("(def test (a) 3 4 5)", "function test(a){\n  3;\n  4;\n  return 5;\n}");
+});
