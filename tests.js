@@ -7,6 +7,24 @@ QUnit.test('ret-obj', function (assert){
   assert.testevl("(ret-obj 'test (fobj (pass-ret-flags (make-ret-obj 'test 3 {a t}))))", "<ret {ret-type test flags {a t} data 3}>");
 });
 
+QUnit.test('Format', function (assert){
+  assert.testevl("(map-format [+ _ 1] 1)", "2");
+  assert.testevl("(map-format [+ _ 1] (lin 1 2))", "<lin {data (2 3)}>");
+  assert.testevl("(map-format [+ _ 1] (lns 1 2))", "<lns {data (2 3)}>");
+  assert.testevl("(map-format [+ _ 1] (ind 2 1 2))", "<ind {n 2 data (2 3)}>");
+  assert.testevl("(map-format [+ _ 1] (note 1 {a 3}))", "<note {opts {a 3} data 2}>");
+});
+
+QUnit.test('rem-all-ret-objs', function (assert){
+  assert.testevl("(rem-all-ret-objs 1)", "1");
+  assert.testevl("(rem-all-ret-objs (lin 1 2 3))", "<lin {data (1 2 3)}>");
+  assert.testevl("(rem-all-ret-objs (make-ret-obj 'test 3))", "3");
+  assert.testevl("(rem-all-ret-objs (make-ret-obj 'test (make-ret-obj 'test 3)))", "3");
+  assert.testevl("(rem-all-ret-objs (lin (make-ret-obj 'test 3)))", "<lin {data (3)}>");
+  assert.testevl("(rem-all-ret-objs (lin (lin (make-ret-obj 'test 3))))", "<lin {data (<lin {data (3)}>)}>");
+  assert.testevl("(rem-all-ret-objs (make-ret-obj 'test (lin (make-ret-obj 'test 3))))", "<lin {data (3)}>");
+});
+
 QUnit.test('js-var', function (assert){
   assert.testevl("(js-var 'a)", "\"a\"");
   assert.testevl("(js-var '-)", "\"sub\"");
@@ -31,7 +49,7 @@ QUnit.test('Atoms', function (assert){
 });
 
 QUnit.test('Inline', function (assert){
-  assert.testevl("(make-in-line '(1 2 3))", "<lin {data (\"1\" \", \" \"2\" \", \" \"3\")}>");
+  assert.testevl("(rem-all-ret-objs (make-in-line '(1 2 3)))", "<lin {data (\"1\" \", \" \"2\" \", \" \"3\")}>");
   assert.testcmp("(random-function 1 2 3)", "randomFunction(1, 2, 3);");
   assert.testcmp("(arr (random-function 1 2 3))", "[randomFunction(1, 2, 3)];");
   assert.testcmp("(arr 1 2 3)", "[1, 2, 3];");
@@ -161,4 +179,12 @@ QUnit.test('return', function (assert){
 QUnit.test('def', function (assert){
   assert.testcmp("(def test (a) 3)", "function test(a){\n  return 3;\n}");
   assert.testcmp("(def test (a) 3 4 5)", "function test(a){\n  3;\n  4;\n  return 5;\n}");
+});
+
+QUnit.test('fn', function (assert){
+  assert.testcmp("(fn (a) 3)", "(function (a){\n  return 3;\n});");
+  assert.testcmp("(js-add (fn (a) 3) 2)", "(function (a){\n  return 3;\n}+2);");
+  assert.testcmp("(js-add 2 (fn (a) 3))", "2+function (a){\n  return 3;\n};");
+  assert.testcmp("(arr (fn (a) 3))", "[function (a){\n  return 3;\n}];");
+  assert.testcmp("((fn (a) 3) 3)", "(function (a){\n  return 3;\n}(3));");
 });
